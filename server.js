@@ -6,7 +6,7 @@ const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = __dirname; // file game nằm ngay thư mục gốc
-const VERSION = 3;
+const VERSION = 4;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
@@ -104,13 +104,34 @@ function leave(ws, room) {
   if (m) { m.delete(ws.peer); if (!m.size) rooms.delete(room); else broadcast(room); }
 }
 
+
+/* ---------- chat toàn server ---------- */
+const chatHist = [];
+const onlineCount = () => { let n = 0; for (const c of wss.clients) if (c.peer) n++; return n; };
+function chatBroadcast(o) {
+  const msg = JSON.stringify(o);
+  for (const c of wss.clients) if (c.chatOn && c.readyState === 1) c.send(msg);
+}
+
 wss.on("connection", ws => {
   ws.rooms = new Set();
   ws.alive = true;
   ws.on("pong", () => { ws.alive = true; });
   ws.on("message", raw => {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
-    if (m.t === "hello" && /^[A-Za-z0-9_-]{4,40}$/.test(m.peer || "")) { ws.peer = m.peer; ws.send(JSON.stringify({ t: "ready" })); return; }
+    if (m.t === "chatjoin") { ws.chatOn = true; ws.send(JSON.stringify({ t: "chathist", msgs: chatHist, online: onlineCount() })); return; }
+    if (m.t === "chat") {
+      const now = Date.now();
+      if (now - (ws.lastChat || 0) < 700) return;
+      const text = String(m.text || "").replace(/[<>]/g, "").trim().slice(0, 150);
+      if (!text) return;
+      ws.lastChat = now;
+      const msg = { t: "chat", name: clean(m.name) || "Ẩn danh", text, ts: now };
+      chatHist.push(msg); if (chatHist.length > 50) chatHist.shift();
+      chatBroadcast(msg);
+      return;
+    }
+    if (m.t === "hello" && /^[A-Za-z0-9_-]{4,40}$/.test(m.peer || "")) { ws.peer = m.peer; ws.send(JSON.stringify({ t: "ready" })); chatBroadcast({ t: "online", n: onlineCount() }); return; }
     if (!ws.peer) return;
     const room = String(m.room || "").slice(0, 80);
     if (!room) return;
@@ -127,7 +148,7 @@ wss.on("connection", ws => {
       broadcast(room);
     } else if (m.t === "leave") leave(ws, room);
   });
-  ws.on("close", () => { for (const r of [...ws.rooms]) leave(ws, r); });
+  ws.on("close", () => { for (const r of [...ws.rooms]) leave(ws, r); setTimeout(() => chatBroadcast({ t: "online", n: onlineCount() }), 100); });
 });
 // dọn kết nối chết
 setInterval(() => {
