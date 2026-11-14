@@ -18,6 +18,7 @@
         LS.set("mf_name", name);
       }
       try { await api("PUT", "/api/profile/" + uid, { name }); } catch (e) {}
+      send({ t: "reg", uid, name });
       return uid;
     },
     async profiles(ids) {
@@ -44,13 +45,14 @@
   };
 
   /* ---------- room (WebSocket) ---------- */
+  const netCbs = new Set();
   let ws, ready, connCbs = [], wsOpen = false;
   const subs = new Map(); // room -> {peers:[], cbs:Set, pending:resolve}
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 
   function connect() {
     ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    ws.onopen = () => { send({ t: "hello", peer: peerId }); };
+    ws.onopen = () => { send({ t: "hello", peer: peerId }); if (name) send({ t: "reg", uid, name }); };
     ws.onmessage = ev => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.t === "ready") {
@@ -62,7 +64,7 @@
         s.cbs.forEach(f => { try { f(); } catch (e) { console.error(e); } });
       } else if (m.t === "joined") {
         const s = subs.get(m.room); if (s && s.pending) { s.pending(); s.pending = null; }
-      }
+      } else { netCbs.forEach(f => { try { f(m); } catch (e) { console.error(e); } }); }
     };
     ws.onclose = () => { wsOpen = false; connCbs.forEach(f => f(false)); setTimeout(connect, 2000); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
@@ -86,6 +88,8 @@
     return r;
   }
 
+  // kênh thô cho bạn bè / chat riêng / lời mời
+  window.mfNet = { uid, send, on: f => { netCbs.add(f); return () => netCbs.delete(f); } };
   let lobby;
   window.claude = {
     async use(what) {
