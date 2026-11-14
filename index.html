@@ -92,6 +92,20 @@ canvas{display:block;width:800px;height:450px;background:#000;touch-action:none}
 .cell{border:3px solid var(--gold);border-radius:12px;background:radial-gradient(#3a5fa5,#1b2a5a);padding:6px 2px;font-size:11px;font-weight:700}
 .cell.pr{border-color:#c084fc;background:radial-gradient(#7c3aed,#3b0764)}.cell b{display:block;font-size:26px}.cell small{display:block;font-weight:400}
 .cell em{display:block;font-style:normal;font-weight:900;color:var(--y)}.cell.dn{opacity:.5}.col.lkd .cell{filter:brightness(.7)}
+
+#chat{position:fixed;inset:0;z-index:40;display:none;background:#000b;align-items:center;justify-content:center}
+#chat.on{display:flex}
+#chat .cb{width:min(520px,96vw);height:min(88vh,560px);display:flex;flex-direction:column;background:var(--bg2);border:4px solid var(--y);border-radius:18px;overflow:hidden}
+#chat .ch{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#0006;border-bottom:3px solid var(--gold);font-weight:900}
+#chat .ch small{font-weight:400;opacity:.85}
+#chL{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px;-webkit-overflow-scrolling:touch;user-select:text;-webkit-user-select:text}
+#chL div{background:var(--card);border-radius:10px;padding:6px 10px;font-size:14px;word-break:break-word}
+#chL div.me{background:rgba(53,224,255,.25)}
+#chL b{color:var(--y)}#chL i{font-style:normal;font-size:10px;opacity:.6;margin-left:6px}
+#chat form{display:flex;gap:8px;padding:10px;background:#0006}
+#chIn{flex:1;min-width:0;font-size:16px;padding:10px;border-radius:10px;border:2px solid var(--c);background:#0008;color:#fff;font-family:inherit;user-select:text;-webkit-user-select:text}
+.ic .bdg{position:absolute;top:-2px;right:-4px;background:#ef4444;border-radius:10px;font-size:10px;padding:1px 5px;display:none}
+.ic{position:relative}
 </style></head><body>
 
 <section id="menu" class="scr on">
@@ -101,6 +115,7 @@ canvas{display:block;width:800px;height:450px;background:#000;touch-action:none}
     <button class="ic" onclick="pHeroes()"><i>🪖</i>Tướng</button>
     <button class="ic" onclick="pItems()"><i>⚔️</i>Trang bị</button>
     <button class="ic" onclick="pGems()"><i>💠</i>Bảng ngọc</button>
+    <button class="ic" onclick="chatOpen()"><i>💬</i>Chat<span class="bdg" id="chBdg"></span></button>
   </div>
   <div class="rp">
     <button class="ev" onclick="pEvents()">🎁 SỰ KIỆN</button>
@@ -312,7 +327,7 @@ function trBracket(){const n=TR.n,st=TR.st;let h=`<div class="ms"><div><b>Bán k
 /* ===== INPUT ===== */
 const key={},kb={},tk={},q={},KEYS=["left","right","jump","atk","s1","s2","s3","s4","dg","gd"];
 const MAP={arrowleft:"left",a:"left",arrowright:"right",d:"right",arrowup:"jump",w:"jump"," ":"jump",j:"atk",u:"s1",i:"s2",o:"s3",p:"s4",l:"dg",shift:"dg",k:"gd"};
-addEventListener("keydown",e=>{const k=MAP[e.key.toLowerCase()];if(!k)return;if(!kb[k]&&!tk[k])q[k]=1;kb[k]=1;e.preventDefault()});
+addEventListener("keydown",e=>{if(e.target&&e.target.tagName==="INPUT")return;const k=MAP[e.key.toLowerCase()];if(!k)return;if(!kb[k]&&!tk[k])q[k]=1;kb[k]=1;e.preventDefault()});
 addEventListener("keyup",e=>{const k=MAP[e.key.toLowerCase()];if(k)kb[k]=0});
 function syncKeys(){for(const k of KEYS)key[k]=kb[k]||tk[k]}
 function clearInput(){for(const k of KEYS){kb[k]=0;tk[k]=0;key[k]=0}document.querySelectorAll("#ctl button").forEach(b=>b.classList.remove("on"))}
@@ -451,4 +466,47 @@ function loop(now){if(!running)return;const dt=Math.min(.033,(now-last)/1000);la
  fx.forEach(f=>{f.l-=dt;f.y-=40*dt;g.globalAlpha=Math.max(0,f.l);g.font="bold 18px sans-serif";g.textAlign="center";g.lineWidth=4;g.strokeStyle="#000";g.fillStyle=f.col;g.strokeText(f.t,f.x,f.y);g.fillText(f.t,f.x,f.y)});g.globalAlpha=1;fx=fx.filter(f=>f.l>0);
  hud();g.restore();requestAnimationFrame(loop)}
 upd();fit();
-</script></body></html>
+</script>
+<div id="chat"><div class="cb">
+  <div class="ch"><span>💬 Chat toàn server</span><span><small id="chOn"></small> <button class="btn" onclick="chatClose()">✕</button></span></div>
+  <div id="chL"></div>
+  <form onsubmit="return chatSend(event)"><input id="chIn" maxlength="150" placeholder="Nhập tin nhắn…" autocomplete="off"><button class="btn" type="submit">Gửi</button></form>
+</div></div>
+<script>
+(function(){
+ let ws,open=0,unread=0,online=0,lastSend=0;
+ const L=document.getElementById("chL"),B=document.getElementById("chBdg"),O=document.getElementById("chOn");
+ const myName=()=>{try{return localStorage.getItem("mf_name")||""}catch(e){return ""}};
+ function add(m){
+  const d=document.createElement("div"),b=document.createElement("b"),t=document.createElement("i");
+  const dt=new Date(m.ts||Date.now());
+  b.textContent=m.name+": ";t.textContent=String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0");
+  d.appendChild(b);d.appendChild(document.createTextNode(m.text));d.appendChild(t);
+  if(m.name===myName())d.className="me";
+  const bottom=L.scrollHeight-L.scrollTop-L.clientHeight<60;
+  L.appendChild(d);while(L.children.length>80)L.removeChild(L.firstChild);
+  if(bottom||open)L.scrollTop=L.scrollHeight;
+ }
+ function badge(){B.style.display=unread&&!open?"block":"none";B.textContent=unread>9?"9+":unread}
+ function conn(){
+  ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
+  ws.onopen=()=>ws.send(JSON.stringify({t:"chatjoin"}));
+  ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
+   if(m.t==="chathist"){L.innerHTML="";m.msgs.forEach(add);online=m.online;O.textContent="🟢 "+online+" online";L.scrollTop=L.scrollHeight}
+   else if(m.t==="chat"){add(m);if(!open){unread++;badge()}}
+   else if(m.t==="online"){online=m.n;O.textContent="🟢 "+online+" online"}};
+  ws.onclose=()=>{O.textContent="🟠 Đang nối…";setTimeout(conn,3000)};
+  ws.onerror=()=>{try{ws.close()}catch(e){}};
+ }
+ setInterval(()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({t:"ping"}))},25000);
+ window.chatOpen=()=>{open=1;unread=0;badge();document.getElementById("chat").classList.add("on");L.scrollTop=L.scrollHeight};
+ window.chatClose=()=>{open=0;document.getElementById("chat").classList.remove("on")};
+ window.chatSend=e=>{
+  e.preventDefault();const i=document.getElementById("chIn"),v=i.value.trim();
+  if(!v||!ws||ws.readyState!==1)return false;
+  if(Date.now()-lastSend<800)return false;lastSend=Date.now();
+  ws.send(JSON.stringify({t:"chat",name:myName()||"Ẩn danh",text:v}));i.value="";return false};
+ conn();
+})();
+</script>
+</body></html>
