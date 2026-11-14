@@ -6,7 +6,7 @@ const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = __dirname; // file game nằm ngay thư mục gốc
-const VERSION = 4;
+const VERSION = 5;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
@@ -50,7 +50,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "GET" && u.pathname === "/api/profiles") {
     const out = {};
-    (u.searchParams.get("ids") || "").split(",").filter(okId).slice(0, 60).forEach(id => { out[id] = DB.profiles[id] || { name: "Người chơi" }; });
+    (u.searchParams.get("ids") || "").split(",").filter(okId).slice(0, 60).forEach(id => { if (DB.profiles[id]) out[id] = DB.profiles[id]; });
     return json(res, 200, out);
   }
   // bảng xếp hạng
@@ -107,6 +107,9 @@ function leave(ws, room) {
 
 /* ---------- chat toàn server ---------- */
 const chatHist = [];
+const invites = new Map(); // "toUid|fromUid" -> ws người mời
+const byUid = uid => [...wss.clients].filter(c => c.uid === uid && c.readyState === 1);
+const sendTo = (uid, o) => byUid(uid).forEach(c => c.send(JSON.stringify(o)));
 const onlineCount = () => { let n = 0; for (const c of wss.clients) if (c.peer) n++; return n; };
 function chatBroadcast(o) {
   const msg = JSON.stringify(o);
@@ -129,6 +132,38 @@ wss.on("connection", ws => {
       const msg = { t: "chat", name: clean(m.name) || "Ẩn danh", text, ts: now };
       chatHist.push(msg); if (chatHist.length > 50) chatHist.shift();
       chatBroadcast(msg);
+      return;
+    }
+    if (m.t === "reg" && /^[A-Za-z0-9_-]{6,40}$/.test(m.uid || "")) { ws.uid = m.uid; ws.nm = clean(m.name) || "Người chơi"; return; }
+    if (m.t === "fq" && Array.isArray(m.ids)) {
+      const on = {};
+      m.ids.slice(0, 60).forEach(id => { if (okId(id) && byUid(id).length) on[id] = 1; });
+      ws.send(JSON.stringify({ t: "fs", on }));
+      return;
+    }
+    if (m.t === "dm" && ws.uid && okId(m.to)) {
+      const now = Date.now();
+      if (now - (ws.lastDm || 0) < 500) return;
+      const text = String(m.text || "").replace(/[<>]/g, "").trim().slice(0, 200);
+      if (!text) return;
+      ws.lastDm = now;
+      sendTo(m.to, { t: "dm", from: ws.uid, name: ws.nm, text, ts: now });
+      return;
+    }
+    if (m.t === "inv" && ws.uid && ws.peer && okId(m.to) && m.to !== ws.uid) {
+      if (!byUid(m.to).length) { ws.send(JSON.stringify({ t: "invx", to: m.to, why: "off" })); return; }
+      invites.set(m.to + "|" + ws.uid, { ws, at: Date.now() });
+      sendTo(m.to, { t: "inv", from: ws.uid, name: ws.nm });
+      return;
+    }
+    if (m.t === "invr" && ws.uid && ws.peer && okId(m.to)) {
+      const k = ws.uid + "|" + m.to, iv = invites.get(k);
+      invites.delete(k);
+      if (!iv || Date.now() - iv.at > 40000 || iv.ws.readyState !== 1) { ws.send(JSON.stringify({ t: "invx", to: m.to, why: "expired" })); return; }
+      if (!m.ok) { iv.ws.send(JSON.stringify({ t: "invno", from: ws.uid, name: ws.nm })); return; }
+      const room = "m-" + iv.ws.peer + "_" + ws.peer;
+      iv.ws.send(JSON.stringify({ t: "invgo", room, host: 1 }));
+      ws.send(JSON.stringify({ t: "invgo", room, host: 0 }));
       return;
     }
     if (m.t === "hello" && /^[A-Za-z0-9_-]{4,40}$/.test(m.peer || "")) { ws.peer = m.peer; ws.send(JSON.stringify({ t: "ready" })); chatBroadcast({ t: "online", n: onlineCount() }); return; }
