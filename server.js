@@ -5,7 +5,7 @@ const path = require("path");
 const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC = path.join(__dirname, "public");
+const PUBLIC = __dirname;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
