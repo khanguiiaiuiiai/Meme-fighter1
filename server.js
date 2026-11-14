@@ -5,7 +5,8 @@ const path = require("path");
 const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC = __dirname;
+const PUBLIC = __dirname; // file game nằm ngay thư mục gốc
+const VERSION = 3;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
@@ -36,7 +37,7 @@ const json = (res, code, o) => { res.writeHead(code, { "Content-Type": "applicat
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
-  if (u.pathname === "/health") return json(res, 200, { ok: 1 });
+  if (u.pathname === "/health") return json(res, 200, { ok: 1, v: VERSION, files: fs.readdirSync(__dirname) });
 
   // đăng ký / đổi tên
   if (req.method === "PUT" && u.pathname.startsWith("/api/profile/")) {
@@ -67,12 +68,18 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, rows);
   }
 
-  // file tĩnh
+  // file tĩnh: ưu tiên public/, nếu thiếu thì tìm index.html + claude-shim.js ở thư mục gốc
   let p = u.pathname === "/" ? "/index.html" : decodeURIComponent(u.pathname);
-  const f = path.normalize(path.join(PUBLIC, p));
-  if (!f.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
+  const name = path.basename(p);
+  const ALLOW = ["index.html", "claude-shim.js"];
+  const cands = ALLOW.includes(name) ? [path.join(__dirname, name)] : [];
+    const f = cands.find(c => fs.existsSync(c) && fs.statSync(c).isFile());
+  if (!f) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Not found: thiếu file " + p + " (cần public/index.html và public/claude-shim.js trong repo). Hiện có: " + (fs.existsSync(PUBLIC) ? fs.readdirSync(PUBLIC).join(", ") : "không có thư mục public"));
+  }
   fs.readFile(f, (err, data) => {
-    if (err) { res.writeHead(404); return res.end("Not found"); }
+    if (err) { res.writeHead(500); return res.end("Error"); }
     res.writeHead(200, { "Content-Type": MIME[path.extname(f)] || "application/octet-stream", "Cache-Control": "no-cache" });
     res.end(data);
   });
